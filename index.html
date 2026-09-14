@@ -217,7 +217,7 @@
   /* ============ Diverging bars (país / hogar) ============ */
   .drow {
     display: grid;
-    grid-template-columns: 170px 1fr 44px;
+    grid-template-columns: 170px 1fr 66px;
     align-items: center;
     gap: 12px;
     padding: 8px 0;
@@ -273,10 +273,23 @@
   }
   .drow .saldo.pos { color: var(--teal-1); }
   .drow .saldo.neg { color: var(--rose-3); }
+  .drow .saldo-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    line-height: 1;
+  }
+  .drow .dnote {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
 
   .axis {
     display: grid;
-    grid-template-columns: 170px 1fr 44px;
+    grid-template-columns: 170px 1fr 66px;
     gap: 12px;
     margin-top: 6px;
     font-size: 10.5px;
@@ -695,7 +708,7 @@ const DATA = {"records":[{"z":4,"g":"Mujer","e":"Entre 18 y 29","ed":"Terciario"
       el.innerHTML = LIKERT_ORDER.slice(0, 5).map(k => {
         const {c} = LIKERT_COLORS[k];
         return `<span><span class="dot" style="background:${c}"></span>${k}</span>`;
-      }).join('') + `<span class="note">Número a la derecha: saldo (positivas − negativas)</span>`;
+      }).join('') + `<span class="note">% sobre respuestas válidas (excluye NS/NC). Número a la derecha: saldo (positivas − negativas).</span>`;
     });
   }
 
@@ -780,17 +793,21 @@ const DATA = {"records":[{"z":4,"g":"Mujer","e":"Entre 18 y 29","ed":"Terciario"
     mid.className = 'midline';
     bar.appendChild(mid);
 
-    if (total > 0) {
+    // Renormalize percentages excluding NS/NC so the bar fills the full width.
+    // NS/NC is surfaced below the bar as text instead of hiding respondents.
+    const nsncWeight = shares['NS/NC'] || 0;
+    const validTotal = total - nsncWeight;
+    const nsncPct = total > 0 ? nsncWeight * 100 / total : 0;
+
+    if (validTotal > 0) {
       const p = {};
-      for (const k of ['Muy buena','Buena','Regular','Mala','Muy mala']) p[k] = pct(shares[k]||0, total);
+      for (const k of ['Muy buena','Buena','Regular','Mala','Muy mala']) p[k] = pct(shares[k]||0, validTotal);
 
       const half = p['Regular'] / 2;
       const segs = [
-        // Left side (cursor moves left from 0, in units of "-100..+100")
         { key:'Regular', start: -half, len: half, color:LIKERT_COLORS['Regular'].c, tone:'neutral', pctLabel: p['Regular'] },
         { key:'Mala',    start: -(half + p['Mala']), len: p['Mala'], color:LIKERT_COLORS['Mala'].c, tone:'bad', pctLabel: p['Mala'] },
         { key:'Muy mala',start: -(half + p['Mala'] + p['Muy mala']), len: p['Muy mala'], color:LIKERT_COLORS['Muy mala'].c, tone:'bad', pctLabel: p['Muy mala'] },
-        // Right side
         { key:'Regular', start: 0, len: half, color:LIKERT_COLORS['Regular'].c, tone:'neutral', pctLabel: null },
         { key:'Buena',   start: half, len: p['Buena'], color:LIKERT_COLORS['Buena'].c, tone:'good', pctLabel: p['Buena'] },
         { key:'Muy buena', start: half + p['Buena'], len: p['Muy buena'], color:LIKERT_COLORS['Muy buena'].c, tone:'good', pctLabel: p['Muy buena'] },
@@ -798,8 +815,6 @@ const DATA = {"records":[{"z":4,"g":"Mujer","e":"Entre 18 y 29","ed":"Terciario"
 
       for (const s of segs) {
         if (s.len <= 0) continue;
-        // Convert from -100..+100 space to 0..100% container:
-        // cssLeft = (start + 100) / 2  ; cssWidth = len / 2
         const cssLeft  = (s.start + 100) / 2;
         const cssWidth = s.len / 2;
         const seg = document.createElement('div');
@@ -809,23 +824,34 @@ const DATA = {"records":[{"z":4,"g":"Mujer","e":"Entre 18 y 29","ed":"Terciario"
         seg.style.background = s.color;
         seg.setAttribute('data-tone', s.tone);
         seg.title = `${s.key}: ${s.pctLabel!=null?s.pctLabel.toFixed(1)+'%':(s.len*2).toFixed(1)+'%'}`;
-        // Label only when the pctLabel is set (avoid the duplicate right-Regular)
         if (s.pctLabel != null && s.pctLabel >= 8) seg.textContent = Math.round(s.pctLabel) + '%';
         bar.appendChild(seg);
       }
+    } else if (total > 0) {
+      // Only NS/NC responses — bar stays empty; annotate below.
     }
     row.appendChild(bar);
 
+    const saldoWrap = document.createElement('div');
+    saldoWrap.className = 'saldo-wrap';
     const saldoEl = document.createElement('div');
     saldoEl.className = 'saldo';
-    if (saldoType && total > 0) {
-      const s = SALDO_FN[saldoType](shares, total);
+    if (saldoType && validTotal > 0) {
+      const s = SALDO_FN[saldoType](shares, validTotal);
       if (s != null && !Number.isNaN(s)) {
-        saldoEl.classList.add(s > 3 ? 'pos' : s < -3 ? 'neg' : '');
+        if (s > 3) saldoEl.classList.add('pos');
+        else if (s < -3) saldoEl.classList.add('neg');
         saldoEl.textContent = (s>0?'+':'') + s;
       } else saldoEl.textContent = '';
     }
-    row.appendChild(saldoEl);
+    saldoWrap.appendChild(saldoEl);
+    if (nsncPct >= 1) {
+      const note = document.createElement('div');
+      note.className = 'dnote';
+      note.textContent = `NS/NC ${nsncPct.toFixed(0)}%`;
+      saldoWrap.appendChild(note);
+    }
+    row.appendChild(saldoWrap);
     container.appendChild(row);
   }
 
